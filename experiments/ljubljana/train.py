@@ -1,7 +1,7 @@
 from itertools import product
 from pathlib import Path
-
-import submitit
+import argparse
+# import submitit
 import torch
 from diffdrr.drr import DRR
 from diffdrr.metrics import MultiscaleNormalizedCrossCorrelation2d
@@ -236,20 +236,28 @@ def main(
     )
 
 if __name__ == "__main__":
-    id_numbers = list(range(10))
-    views = ["ap", "lat"]
-    id_numbers = [i for i, _ in product(id_numbers, views)]
-    views = [v for _, v in product(id_numbers, views)]
+    # id_numbers = list(range(10))
+    # views = ["ap", "lat"]
+    # id_numbers = [i for i, _ in product(id_numbers, views)]
+    # views = [v for _, v in product(id_numbers, views)]
     
-    Path("checkpoints").mkdir(exist_ok=True)
+    # Path("checkpoints").mkdir(exist_ok=True)
 
-    executor = submitit.AutoExecutor(folder="logs")
-    executor.update_parameters(
-        name="ljubljana",
-        gpus_per_node=1,
-        mem_gb=10.0,
-        slurm_array_parallelism=len(id_numbers),
-        slurm_partition="2080ti",
-        timeout_min=10_000,
-    )
-    jobs = executor.map_array(main, id_numbers, views)
+    # executor = submitit.AutoExecutor(folder="logs")
+    # executor.update_parameters(
+    #     name="ljubljana",
+    #     gpus_per_node=1,
+    #     mem_gb=10.0,
+    #     slurm_array_parallelism=len(id_numbers),
+    #     slurm_partition="2080ti",
+    #     timeout_min=10_000,
+    # )
+    # jobs = executor.map_array(main, id_numbers, views)
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--id", type=int, required=True, help="specimen ID to train")
+    parser.add_argument("--view", type=str, required=True, help="view (ap/lat)")
+    args = parser.parse_args()
+    Path("checkpoints").mkdir(exist_ok=True)
+    print(f"Training specimen {args.id}, view {args.view} ...")
+    main(args.id, args.view)
