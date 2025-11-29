@@ -1,5 +1,5 @@
 from pathlib import Path
-
+import argparse
 import submitit
 import torch
 from diffdrr.drr import DRR
@@ -7,6 +7,9 @@ from diffdrr.metrics import MultiscaleNormalizedCrossCorrelation2d
 from pytorch_transformers.optimization import WarmupCosineSchedule
 from timm.utils.agc import adaptive_clip_grad as adaptive_clip_grad_
 from tqdm import tqdm
+import sys
+from pathlib import Path
+sys.path.append(str(Path(__file__).parent.parent.parent))
 
 from diffpose.deepfluoro import DeepFluoroDataset, Transforms, get_random_offset
 from diffpose.metrics import DoubleGeodesic, GeodesicSE3
@@ -216,17 +219,24 @@ def main(
 
 
 if __name__ == "__main__":
-    id_numbers = [1, 2, 3, 4, 5, 6]
-    Path("checkpoints").mkdir(exist_ok=True)
+    # id_numbers = [1, 2, 3, 4, 5, 6]
+    # Path("checkpoints").mkdir(exist_ok=True)
 
-    executor = submitit.AutoExecutor(folder="logs")
-    executor.update_parameters(
-        name="deepfluoro",
-        gpus_per_node=1,
-        mem_gb=43.5,
-        slurm_array_parallelism=len(id_numbers),
-        slurm_partition="A6000",
-        slurm_exclude="sumac,fennel",
-        timeout_min=10_000,
-    )
-    jobs = executor.map_array(main, id_numbers)
+    # executor = submitit.AutoExecutor(folder="logs")
+    # executor.update_parameters(
+    #     name="deepfluoro",
+    #     gpus_per_node=1,
+    #     mem_gb=43.5,
+    #     slurm_array_parallelism=len(id_numbers),
+    #     slurm_partition="A6000",
+    #     slurm_exclude="sumac,fennel",
+    #     timeout_min=10_000,
+    # )
+    # jobs = executor.map_array(main, id_numbers)
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--id", type=int, required=True, help="specimen ID to train")
+    args = parser.parse_args()
+    Path("checkpoints").mkdir(exist_ok=True)
+    print(f"Training specimen {args.id}...")
+    main(args.id)
