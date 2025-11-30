@@ -236,7 +236,8 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--id", type=int, required=True, help="specimen ID to train")
+    parser.add_argument("--restart", type=str, default=None, help="path to checkpoint to restart from") 
     args = parser.parse_args()
     Path("checkpoints").mkdir(exist_ok=True)
     print(f"Training specimen {args.id}...")
-    main(args.id)
+    main(args.id, args.restart)
