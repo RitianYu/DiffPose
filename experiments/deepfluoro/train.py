@@ -193,8 +193,12 @@ def main(
         ckpt = torch.load(restart)
         model.load_state_dict(ckpt["model_state_dict"])
         optimizer.load_state_dict(ckpt["optimizer_state_dict"])
+        # 关键：把optimizer的state转到device
+        for state in optimizer.state.values():
+            for k, v in state.items():
+                if isinstance(v, torch.Tensor):
+                    state[k] = v.to(device)
     model = model.to(device)
-    optimizer = optimizer.to(device)
 
     scheduler = WarmupCosineSchedule(
         optimizer,
