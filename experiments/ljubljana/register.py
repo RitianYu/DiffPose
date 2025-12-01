@@ -1,15 +1,16 @@
 import time
 from itertools import product
 from pathlib import Path
-
+import pickle
 import pandas as pd
-import submitit
 import torch
 from diffdrr.drr import DRR
 from diffdrr.metrics import MultiscaleNormalizedCrossCorrelation2d
 from torchvision.transforms.functional import resize
 from tqdm import tqdm
-
+import sys
+from pathlib import Path
+sys.path.append(str(Path(__file__).parent.parent.parent))
 from diffpose.calibration import RigidTransform, convert
 from diffpose.ljubljana import Evaluator, LjubljanaDataset, Transforms
 from diffpose.metrics import DoubleGeodesic, GeodesicSE3
@@ -49,7 +50,7 @@ def initialize(id_number, view, subsample=8):
     isocenter_pose = isocenter_pose.cuda()
     evaluator = Evaluator(subject, id_number)
 
-    # Initialize the DRR
+    # Initialize DRR
     height //= subsample
     width //= subsample
     delx *= subsample
@@ -68,7 +69,7 @@ def initialize(id_number, view, subsample=8):
     ).to("cuda")
     transforms = Transforms(height, width)
 
-    # Get the estimated pose and features
+    # Get predicted pose and features
     pose = pose.to("cuda")
     img = transforms(img).to("cuda")
     with torch.no_grad():
@@ -117,7 +118,7 @@ class Registration:
         self.geodesics = GeodesicSE3()
         self.doublegeo = DoubleGeodesic(drr.detector.sdr)
         self.criterion = MultiscaleNormalizedCrossCorrelation2d(
-            [None, 13],  # None corresponds to global
+            [None, 13],  # None means global NCC
             [0.5, 0.5],
         )
         self.target_registration_error = evaluator
@@ -170,19 +171,19 @@ class Registration:
     def run(self):
         # Initial loss
         param, geo, tre = self.evaluate()
+
         params = [param]
         losses = []
         geodesic = [geo]
         fiducial = [tre]
         times = []
 
-        itr = (
-            tqdm(range(self.n_iters), ncols=75) if self.verbose else range(self.n_iters)
-        )
+        # Optimization loop
+        itr = tqdm(range(self.n_iters), ncols=75) if self.verbose else range(self.n_iters)
         for _ in itr:
             t0 = time.perf_counter()
             self.optimizer.zero_grad()
-            pred_img, mask = self.registration(n_patches=None)
+            pred_img, mask = self.registration()
             loss = self.criterion(pred_img, self.img)
             loss.backward()
             self.optimizer.step()
@@ -196,31 +197,46 @@ class Registration:
             fiducial.append(tre)
             times.append(t1 - t0)
 
-        # Loss at final iteration
+        # Final pass
         pred_img, mask = self.registration()
         loss = self.criterion(pred_img, self.img)
         losses.append(loss.item())
         times.append(0)
 
-        # Write results to dataframe
+        # Final dataframe
         df = pd.DataFrame(params, columns=["alpha", "beta", "gamma", "bx", "by", "bz"])
         df["ncc"] = losses
         df[["geo_r", "geo_t", "geo_d", "geo_se3"]] = geodesic
         df["fiducial"] = fiducial
         df["time"] = times
         df["parameterization"] = self.parameterization
-        return df
+
+        return df, self.registration.get_current_pose()
 
 
 def main(id_number, view, parameterization="se3_log_map"):
     drr, img, pose, pred_pose, features, evaluator = initialize(id_number, view)
-    registration = Registration(drr, img, pose, pred_pose, features, evaluator, parameterization)
-    df = registration.run()
+
+    # Save initial pose
+    initial_pose_mat = pred_pose.as_matrix().cpu().numpy()
+    with open(f"runs/specimen{id_number:02d}_{view}_initial_pose.pkl", "wb") as f:
+        pickle.dump(initial_pose_mat, f)
+
+    registration = Registration(
+        drr, img, pose, pred_pose, features, evaluator, parameterization
+    )
+    df, final_pose = registration.run()
+
+    # Save final pose
+    final_pose_mat = final_pose.as_matrix().cpu().numpy()
+    with open(f"runs/specimen{id_number:02d}_{view}_final_pose.pkl", "wb") as f:
+        pickle.dump(final_pose_mat, f)
+
     df.to_csv(
         f"runs/specimen{id_number:02d}_{view}_{parameterization}.csv",
         index=False,
     )
-        
+
 
 if __name__ == "__main__":
     seed = 123
@@ -231,19 +247,9 @@ if __name__ == "__main__":
 
     id_numbers = list(range(10))
     views = ["ap", "lat"]
-    id_numbers = [i for i, _ in product(id_numbers, views)]
-    views = [v for _, v in product(id_numbers, views)]
 
     Path("runs").mkdir(exist_ok=True)
 
-    executor = submitit.AutoExecutor(folder="logs")
-    executor.update_parameters(
-        name="registration",
-        gpus_per_node=1,
-        mem_gb=10.0,
-        slurm_array_parallelism=len(id_numbers),
-        slurm_exclude="sassafras",
-        slurm_partition="2080ti",
-        timeout_min=10_000,
-    )
-    jobs = executor.map_array(main, id_numbers, views)
+    for id_number, view in product(id_numbers, views):
+        print(f"Running specimen {id_number:02d}, view {view}")
+        main(id_number, view)

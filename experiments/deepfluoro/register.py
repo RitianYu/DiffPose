@@ -1,15 +1,16 @@
 import time
 from itertools import product
 from pathlib import Path
-
+import pickle
 import pandas as pd
-import submitit
 import torch
 from diffdrr.drr import DRR
 from diffdrr.metrics import MultiscaleNormalizedCrossCorrelation2d
 from torchvision.transforms.functional import resize
 from tqdm import tqdm
-
+import sys
+from pathlib import Path
+sys.path.append(str(Path(__file__).parent.parent.parent))
 from diffpose.calibration import RigidTransform, convert
 from diffpose.deepfluoro import DeepFluoroDataset, Evaluator, Transforms
 from diffpose.metrics import DoubleGeodesic, GeodesicSE3
@@ -60,6 +61,7 @@ class Registration:
             features -= features.min()
             features /= features.max() - features.min()
             features /= features.sum()
+
         pred_pose = self.isocenter_pose.compose(offset)
 
         return SparseRegistration(
@@ -68,7 +70,7 @@ class Registration:
             parameterization=self.parameterization,
             convention=self.convention,
             features=features,
-        )
+        ), pred_pose
 
     def initialize_optimizer(self, registration):
         optimizer = torch.optim.Adam(
@@ -110,21 +112,24 @@ class Registration:
         img = self.transforms(img).to(self.device)
         self.pose = pose.to(self.device)
 
-        registration = self.initialize_registration(img)
+        # -------------- Initial Pose ------------------
+        registration, initial_pose = self.initialize_registration(img)
+
         optimizer, scheduler = self.initialize_optimizer(registration)
         self.target_registration_error = Evaluator(self.specimen, idx)
 
-        # Initial loss
-        param, geo, tre = self.evaluate(registration)
-        params = [param]
+        params = []
         losses = []
-        geodesic = [geo]
-        fiducial = [tre]
+        geodesic = []
+        fiducial = []
         times = []
 
-        itr = (
-            tqdm(range(self.n_iters), ncols=75) if self.verbose else range(self.n_iters)
-        )
+        param, geo, tre = self.evaluate(registration)
+        params.append(param)
+        geodesic.append(geo)
+        fiducial.append(tre)
+
+        itr = tqdm(range(self.n_iters), ncols=75) if self.verbose else range(self.n_iters)
         for _ in itr:
             t0 = time.perf_counter()
             optimizer.zero_grad()
@@ -142,11 +147,14 @@ class Registration:
             fiducial.append(tre)
             times.append(t1 - t0)
 
-        # Loss at final iteration
+        # final loss
         pred_img, mask = registration()
         loss = self.criterion(pred_img, img)
         losses.append(loss.item())
         times.append(0)
+
+        # -------------- Final pose -------------------
+        final_pose = registration.get_current_pose()
 
         # Write results to dataframe
         df = pd.DataFrame(params, columns=["alpha", "beta", "gamma", "bx", "by", "bz"])
@@ -156,7 +164,8 @@ class Registration:
         df["time"] = times
         df["idx"] = idx
         df["parameterization"] = self.parameterization
-        return df
+
+        return df, initial_pose, final_pose
 
 
 def main(id_number, parameterization):
@@ -192,12 +201,29 @@ def main(id_number, parameterization):
         model,
         parameterization,
     )
+
+    # 存储所有样本 pose
+    initial_poses = {}
+    final_poses = {}
+
     for idx in tqdm(range(len(specimen)), ncols=100):
-        df = registration.run(idx)
+        df, initial_pose, final_pose = registration.run(idx)
+
         df.to_csv(
             f"runs/specimen{id_number:02d}_xray{idx:03d}_{parameterization}.csv",
             index=False,
         )
+
+        # 保存矩阵形式的 SE3
+        initial_poses[idx] = initial_pose.as_matrix().cpu().numpy()
+        final_poses[idx] = final_pose.as_matrix().cpu().numpy()
+
+    # ----- 输出 pkl 文件 -----
+    with open(f"runs/specimen{id_number:02d}_{parameterization}_initial_poses.pkl", "wb") as f:
+        pickle.dump(initial_poses, f)
+
+    with open(f"runs/specimen{id_number:02d}_{parameterization}_final_poses.pkl", "wb") as f:
+        pickle.dump(final_poses, f)
 
 
 if __name__ == "__main__":
@@ -210,25 +236,17 @@ if __name__ == "__main__":
     id_numbers = [1, 2, 3, 4, 5, 6]
     parameterizations = [
         "se3_log_map",
-        "so3_log_map",
-        "axis_angle",
-        "euler_angles",
-        "quaternion",
-        "rotation_6d",
-        "rotation_10d",
-        "quaternion_adjugate",
+        # "so3_log_map",
+        # "axis_angle",
+        # "euler_angles",
+        # "quaternion",
+        # "rotation_6d",
+        # "rotation_10d",
+        # "quaternion_adjugate",
     ]
-    id_numbers = [i for i, _ in product(id_numbers, parameterizations)]
-    parameterizations = [p for _, p in product(id_numbers, parameterizations)]
+
     Path("runs").mkdir(exist_ok=True)
 
-    executor = submitit.AutoExecutor(folder="logs")
-    executor.update_parameters(
-        name="registration",
-        gpus_per_node=1,
-        mem_gb=10.0,
-        slurm_array_parallelism=12,
-        slurm_partition="2080ti",
-        timeout_min=10_000,
-    )
-    jobs = executor.map_array(main, id_numbers, parameterizations)
+    for id_number, p in product(id_numbers, parameterizations):
+        print(f"Running specimen {id_number}, parameterization {p}")
+        main(id_number, p)
