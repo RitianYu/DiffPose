@@ -12,8 +12,10 @@ import h5py
 import numpy as np
 import torch
 from beartype import beartype
-
-from .calibration import RigidTransform, perspective_projection
+import sys
+from pathlib import Path
+sys.path.append(str(Path(__file__).parent))
+from calibration import RigidTransform, perspective_projection
 
 # %% ../notebooks/api/00_deepfluoro.ipynb 5
 @beartype
@@ -89,7 +91,6 @@ class DeepFluoroDataset(torch.utils.data.Dataset):
         world2volume = torch.from_numpy(projection["gt-poses/cam-to-pelvis-vol"][:])
         world2volume = RigidTransform(world2volume[:3, :3], world2volume[:3, 3])
         pose = convert_deepfluoro_to_diffdrr(self, world2volume)
-
         # Handle rotations in the imaging dataset
         if self._rot_180_for_up(idx):
             img = torch.rot90(img, k=2)
@@ -158,7 +159,7 @@ def convert_diffdrr_to_deepfluoro(specimen, pose: RigidTransform):
 # %% ../notebooks/api/00_deepfluoro.ipynb 7
 from torch.nn.functional import pad
 
-from .calibration import perspective_projection
+from calibration import perspective_projection
 
 
 class Evaluator:
@@ -174,6 +175,7 @@ class Evaluator:
         self.fiducials = specimen.fiducials
         gt_pose = specimen[idx][1]
         self.true_projected_fiducials = self.project(gt_pose)
+        self.true_projected_fiducials_2d = self.project_2d(gt_pose)
 
     def project(self, pose):
         extrinsic = convert_diffdrr_to_deepfluoro(self.specimen, pose)
@@ -188,10 +190,16 @@ class Evaluator:
         )
         return extrinsic.transform_points(x)
 
+    def project_2d(self, pose):
+        extrinsic = convert_diffdrr_to_deepfluoro(self.specimen, pose)
+        x = perspective_projection(extrinsic, self.intrinsic, self.fiducials)
+        
+        return x
+    
     def __call__(self, pose):
-        pred_projected_fiducials = self.project(pose)
+        pred_projected_fiducials_2d = self.project_2d(pose)
         registration_error = (
-            (self.true_projected_fiducials - pred_projected_fiducials)
+            (self.true_projected_fiducials_2d - pred_projected_fiducials_2d)
             .norm(dim=-1)
             .mean()
         )
@@ -306,7 +314,7 @@ def preprocess(img, size=None, initial_energy=torch.tensor(65487.0)):
     return img
 
 # %% ../notebooks/api/00_deepfluoro.ipynb 26
-from .calibration import RigidTransform, convert
+from calibration import RigidTransform, convert
 
 
 @beartype

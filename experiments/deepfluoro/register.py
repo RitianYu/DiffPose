@@ -177,12 +177,10 @@ def main(id_number, parameterization):
         norm_layer=ckpt["norm_layer"],
     )
     model.load_state_dict(ckpt["model_state_dict"])
-
     specimen = DeepFluoroDataset(id_number)
     height = ckpt["height"]
     subsample = (1536 - 100) / height
     delx = 0.194 * subsample
-
     drr = DRR(
         specimen.volume,
         specimen.spacing,

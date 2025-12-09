@@ -155,3 +155,5 @@ checklink/cookies.txt
 
 # Quarto
 .quarto
+*.pkl
+*.csv 
