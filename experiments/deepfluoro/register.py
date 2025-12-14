@@ -2,6 +2,7 @@ import time
 from itertools import product
 from pathlib import Path
 import pickle
+import numpy as np
 import pandas as pd
 import torch
 from diffdrr.drr import DRR
@@ -123,11 +124,14 @@ class Registration:
         geodesic = []
         fiducial = []
         times = []
+        opt_poses = []
 
         param, geo, tre = self.evaluate(registration)
         params.append(param)
         geodesic.append(geo)
         fiducial.append(tre)
+        opt_pose = registration.get_current_pose().get_matrix().cpu().numpy()[0].T
+        opt_poses.append(opt_pose.flatten())
 
         itr = tqdm(range(self.n_iters), ncols=75) if self.verbose else range(self.n_iters)
         for _ in itr:
@@ -141,11 +145,15 @@ class Registration:
             t1 = time.perf_counter()
 
             param, geo, tre = self.evaluate(registration)
+
+            opt_pose = registration.get_current_pose().get_matrix().cpu().numpy()[0].T
+
             params.append(param)
             losses.append(loss.item())
             geodesic.append(geo)
             fiducial.append(tre)
             times.append(t1 - t0)
+            opt_poses.append(opt_pose.flatten())
 
         # final loss
         pred_img, mask = registration()
@@ -153,19 +161,21 @@ class Registration:
         losses.append(loss.item())
         times.append(0)
 
-        # -------------- Final pose -------------------
-        final_pose = registration.get_current_pose()
-
         # Write results to dataframe
         df = pd.DataFrame(params, columns=["alpha", "beta", "gamma", "bx", "by", "bz"])
         df["ncc"] = losses
         df[["geo_r", "geo_t", "geo_d", "geo_se3"]] = geodesic
         df["fiducial"] = fiducial
         df["time"] = times
+        
+        # Add opt_pose columns (16 elements from 4x4 matrix)
+        opt_poses_array = np.array(opt_poses)
+        for i in range(16):
+            df[f"pose_{i}"] = opt_poses_array[:, i]
         df["idx"] = idx
         df["parameterization"] = self.parameterization
 
-        return df, initial_pose, final_pose
+        return df, initial_pose
 
 
 def main(id_number, parameterization):
@@ -213,8 +223,8 @@ def main(id_number, parameterization):
         )
 
         # 保存矩阵形式的 SE3
-        initial_poses[idx] = initial_pose.as_matrix().cpu().numpy()
-        final_poses[idx] = final_pose.as_matrix().cpu().numpy()
+        initial_poses[idx] = initial_pose.get_matrix().cpu().numpy()[0].T
+        final_poses[idx] = final_pose.get_matrix().cpu().numpy()[0].T
 
     # ----- 输出 pkl 文件 -----
     with open(f"runs/specimen{id_number:02d}_{parameterization}_initial_poses.pkl", "wb") as f:

@@ -41,7 +41,7 @@ def main():
 
     all_rows = []  # 用于最终合并所有 subject
 
-    with open("/nas2/home/yuhao/code/DiffPose/diffpose_deepfluoro_final_pose.pkl", "rb") as f:
+    with open("/nas2/home/yuhao/code/DiffPose/diffpose_deepfluoro_init_pose.pkl", "rb") as f:
         pred_poses = pickle.load(f)
 
     for subject_id in range(1, 7):
@@ -60,9 +60,9 @@ def main():
     df = pd.DataFrame(all_rows, columns=["subject_id", "sample_id", "error"])
 
     # 保存到一个csv
-    df.to_csv("debug/all_subjects_errors.csv", index=False)
+    df.to_csv("/nas2/home/yuhao/code/DiffPose/results/diffpose/deepfluoro/all_subjects_init_errors.csv", index=False)
 
-    print("\nSaved: debug/all_subjects_errors.csv")
+    print("\nSaved: /nas2/home/yuhao/code/DiffPose/results/diffpose/deepfluoro/all_subjects_init_errors.csv")
 
 
 if __name__ == "__main__":

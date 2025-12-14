@@ -2,8 +2,8 @@ import os
 import pickle
 import re
 
-INPUT_DIR = "./results/diffpose/deepfluoro"
-OUTPUT_PKL = "diffpose_deepfluoro_final_pose.pkl"
+INPUT_DIR = "/nas2/home/yuhao/code/DiffPose/results/diffpose/deepfluoro"
+OUTPUT_PKL = "diffpose_deepfluoro_init_pose.pkl"
 
 def load_pkl(path):
     with open(path, "rb") as f:
@@ -16,8 +16,8 @@ def main():
         if not filename.endswith(".pkl"):
             continue
 
-        # 匹配 final pose 文件
-        match = re.match(r"(specimen)(\d+)_se3_log_map_final_poses\.pkl", filename)
+        # 匹配 initial pose 文件
+        match = re.match(r"(specimen)(\d+)_se3_log_map_initial_poses\.pkl", filename)
         if not match:
             continue
 
